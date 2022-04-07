@@ -6,7 +6,7 @@
   ******************************************************************************
   * @attention
   *
-  * <h2><center>&copy; Copyright (c) 2019 STMicroelectronics.
+  * <h2><center>&copy; Copyright (c) 2022 STMicroelectronics.
   * All rights reserved.</center></h2>
   *
   * This software component is licensed by ST under Ultimate Liberty license
@@ -24,6 +24,7 @@
 #include "cmsis_os.h"
 #include "lwip.h"
 #include "task.h"
+#include "FreeRTOS.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -86,75 +87,75 @@ static void MX_USART6_UART_Init(void);
 void StartDefaultTask(void * argument);
 
 /* USER CODE BEGIN PFP */
+#define BUFSIZE 4096
+char buffer[BUFSIZE];
+extern struct netif gnetif;
+UART_HandleTypeDef * printf_uart = NULL;
+// extern appMain;
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
-
-// Used to read out registers
-extern "C"	void prvGetRegistersFromStack( uint32_t *pulFaultStackAddress )
+extern "C" int __io_putchar(int ch)
 {
-	/* These are volatile to try and prevent the compiler/linker optimising them
-	away as the variables never actually get used.  If the debugger won't show the
-	values of the variables, make them global my moving their declaration outside
-	of this function. */
-	volatile uint32_t r0;
-	volatile uint32_t r1;
-	volatile uint32_t r2;
-	volatile uint32_t r3;
-	volatile uint32_t r12;
-	volatile uint32_t lr; /* Link register. */
-	volatile uint32_t pc; /* Program counter. */
-	volatile uint32_t psr;/* Program status register. */
-
-	r0 = pulFaultStackAddress[ 0 ];
-	r1 = pulFaultStackAddress[ 1 ];
-	r2 = pulFaultStackAddress[ 2 ];
-	r3 = pulFaultStackAddress[ 3 ];
-
-	r12 = pulFaultStackAddress[ 4 ];
-	lr = pulFaultStackAddress[ 5 ];
-	pc = pulFaultStackAddress[ 6 ];
-	psr = pulFaultStackAddress[ 7 ];
-
-	/* When the following line is hit, the variables contain the register values. */
-	for( ;; );
-}
-
-
-extern "C" int __io_putchar(int ch) {
-  //taskENTER_CRITICAL();
-  HAL_UART_Transmit(&huart6, (uint8_t *)&ch, 1, 1000);
-  //taskEXIT_CRITICAL();
+  uint8_t c[1];
+  c[0] = ch & 0x00FF;
+  if (printf_uart != NULL){
+     HAL_UART_Transmit(printf_uart, &c[0], 1, 10);
+  }
   return ch;
 }
 
-void uart_print(char* str){
-	taskENTER_CRITICAL();
-	HAL_UART_Transmit(&huart6, (uint8_t*) str, strlen(str), 100);
-	taskEXIT_CRITICAL();
+
+// Used to read out registers
+extern "C"  void prvGetRegistersFromStack( uint32_t *pulFaultStackAddress )
+{
+  /* These are volatile to try and prevent the compiler/linker optimising them
+  away as the variables never actually get used.  If the debugger won't show the
+  values of the variables, make them global my moving their declaration outside
+  of this function. */
+  volatile uint32_t r0;
+  volatile uint32_t r1;
+  volatile uint32_t r2;
+  volatile uint32_t r3;
+  volatile uint32_t r12;
+  volatile uint32_t lr; /* Link register. */
+  volatile uint32_t pc; /* Program counter. */
+  volatile uint32_t psr;/* Program status register. */
+
+  r0 = pulFaultStackAddress[ 0 ];
+  r1 = pulFaultStackAddress[ 1 ];
+  r2 = pulFaultStackAddress[ 2 ];
+  r3 = pulFaultStackAddress[ 3 ];
+
+  r12 = pulFaultStackAddress[ 4 ];
+  lr = pulFaultStackAddress[ 5 ];
+  pc = pulFaultStackAddress[ 6 ];
+  psr = pulFaultStackAddress[ 7 ];
+
+  /* When the following line is hit, the variables contain the register values. */
+  for( ;; );
 }
 
 void * operator new( size_t size )
 {
-	return pvPortMalloc( size );
+  return pvPortMalloc( size );
 }
 
 void operator delete( void * ptr )
 {
-	vPortFree ( ptr );
+  vPortFree ( ptr );
 }
 
 extern "C" void vApplicationStackOverflowHook( TaskHandle_t xTask, signed char *pcTaskName ){
-	uart_print("Stackoverflow\n");
-	while(1);
+  printf("Stackoverflow\n");
+  while(1);
 }
 
 extern "C" void vApplicationMallocFailedHook( void ){
-	uart_print("Malloc failed\n");
-	while(1);
+  printf("Malloc failed\n");
+  while(1);
 }
 
 /* USER CODE END 0 */
@@ -168,6 +169,9 @@ int main(void)
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
+
+  /* Enable D-Cache---------------------------------------------------------*/
+  SCB_EnableDCache();
 
   /* MCU Configuration--------------------------------------------------------*/
 
@@ -191,8 +195,9 @@ int main(void)
   MX_USB_OTG_FS_PCD_Init();
   MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
-
+  printf_uart = &huart3;
   /* USER CODE END 2 */
+  /* Init scheduler */
   osKernelInitialize();
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
@@ -211,7 +216,7 @@ int main(void)
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* definition and creation of defaultTask */
+/* definition and creation of defaultTask */
   //osThreadDef(defaultTask, StartDefaultTask, osPriorityRealtime, 0, 250);
   //defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
 
@@ -222,9 +227,13 @@ int main(void)
   /* add threads, ... */
   /* USER CODE END RTOS_THREADS */
 
+  /* USER CODE BEGIN RTOS_EVENTS */
+  /* add events, ... */
+  /* USER CODE END RTOS_EVENTS */
+
   /* Start scheduler */
   osKernelStart();
-  
+
   /* We should never get here as control is now taken by the scheduler */
 
   /* Infinite loop */
@@ -248,14 +257,14 @@ void SystemClock_Config(void)
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
   RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
 
-  /** Configure LSE Drive Capability 
+  /** Configure LSE Drive Capability
   */
   HAL_PWR_EnableBkUpAccess();
-  /** Configure the main internal regulator output voltage 
+  /** Configure the main internal regulator output voltage
   */
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE3);
-  /** Initializes the CPU, AHB and APB busses clocks 
+  /** Initializes the CPU, AHB and APB busses clocks
   */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
@@ -269,13 +278,13 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  /** Activate the Over-Drive mode 
+  /** Activate the Over-Drive mode
   */
   if (HAL_PWREx_EnableOverDrive() != HAL_OK)
   {
     Error_Handler();
   }
-  /** Initializes the CPU, AHB and APB busses clocks 
+  /** Initializes the CPU, AHB and APB busses clocks
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
@@ -462,55 +471,55 @@ static void MX_GPIO_Init(void)
 
 //Callback function to set the boolean to true upon a match
 void setTrue(void* args){
-	*static_cast<volatile bool*>(args) = true;
+  *static_cast<volatile bool*>(args) = true;
 }
 
 void message_callback(void* callee, const rtps::ReaderCacheChange& cacheChange){
-	rtps::Writer* writer = (rtps::Writer*) callee;
-	static std::array<uint8_t,10> data{};
-	data.fill(10);
-	auto* change = writer->newChange(rtps::ChangeKind_t::ALIVE, data.data(), data.size());
+  rtps::Writer* writer = (rtps::Writer*) callee;
+  static std::array<uint8_t,10> data{};
+  data.fill(10);
+  auto* change = writer->newChange(rtps::ChangeKind_t::ALIVE, data.data(), data.size());
 }
 
 
 //Function to start the RTPS Test
 void startRTPStest(){
 
-	//Initialize variables and complete RTPS initialization
-	bool subMatched = false;
-	bool pubMatched = false;
-	bool received_message = false;
+  //Initialize variables and complete RTPS initialization
+  bool subMatched = false;
+  bool pubMatched = false;
+  bool received_message = false;
 
-	static rtps::Domain domain;
+  static rtps::Domain domain;
 
-	//Create RTPS participant
-	rtps::Participant* part = domain.createParticipant();
-	if(part == nullptr){
-		return;
-	}
+  //Create RTPS participant
+  rtps::Participant* part = domain.createParticipant();
+  if(part == nullptr){
+    return;
+  }
 
-	//Register callback to ensure that a publisher is matched to the writer before sending messages
-	part->registerOnNewPublisherMatchedCallback(setTrue, &pubMatched);
-	part->registerOnNewSubscriberMatchedCallback(setTrue, &subMatched);
+  //Register callback to ensure that a publisher is matched to the writer before sending messages
+  part->registerOnNewPublisherMatchedCallback(setTrue, &pubMatched);
+  part->registerOnNewSubscriberMatchedCallback(setTrue, &subMatched);
 
-	//Create new writer to send messages
-	rtps::Writer* writer = domain.createWriter(*part, "TOLINUX","TEST", false);
-	rtps::Reader* reader = domain.createReader(*part, "TOSTM","TEST", false);
-	reader->registerCallback(&message_callback, writer);
+  //Create new writer to send messages
+  rtps::Writer* writer = domain.createWriter(*part, "TOLINUX","TEST", false);
+  rtps::Reader* reader = domain.createReader(*part, "TOSTM","TEST", false);
+  reader->registerCallback(&message_callback, writer);
 
-	domain.completeInit();
+  domain.completeInit();
 
-	//Check that writer creation was successful
-	if(writer == nullptr || reader == nullptr){
-		return;
-	}
+  //Check that writer creation was successful
+  if(writer == nullptr || reader == nullptr){
+    return;
+  }
 
-	//Wait for the subscriber on the Linux side to match
-	while(!subMatched || !pubMatched){
+  //Wait for the subscriber on the Linux side to match
+  while(!subMatched || !pubMatched){
 
-	}
+  }
 
-	while(true){}
+  while(true){}
 }
 
 
@@ -519,25 +528,72 @@ void startRTPStest(){
 /* USER CODE BEGIN Header_StartDefaultTask */
 /**
   * @brief  Function implementing the defaultTask thread.
-  * @param  argument: Not used 
+  * @param  argument: Not used
   * @retval None
   */
 /* USER CODE END Header_StartDefaultTask */
-
-
-void StartDefaultTask(void * argument)
+void StartDefaultTask(void *argument)
 {
+  /* init code for LWIP */
+  MX_LWIP_Init();
+  /* USER CODE BEGIN 5 */
+  HAL_GPIO_WritePin(USB_PowerSwitchOn_GPIO_Port, USB_PowerSwitchOn_Pin, GPIO_PIN_RESET);
+  bool availableNetwork = false;
 
-	/* init code for LWIP */
-	MX_LWIP_Init();
+  printf("Ethernet Initialization\r\n");
 
-    /* USER CODE BEGIN 5 */
-	startRTPStest();
+  //Waiting for an IP
+  printf("Waiting for IP\r\n");
+  int retries = 0;
+  while(gnetif.ip_addr.addr == 0 && retries < 10){
+    osDelay(500);
+    retries++;
+  };
 
-	volatile auto size = uxTaskGetStackHighWaterMark(nullptr);
+  availableNetwork = (gnetif.ip_addr.addr != 0);
+  if (availableNetwork){
+    printf("IP: %s\r\n",ip4addr_ntoa(&gnetif.ip_addr));
+  }else{
+    printf("Impossible to retrieve an IP\n");
+  }
 
-    while(1);
-  /* USER CODE END 5 */ 
+  osDelay(500);
+  char ptrTaskList[500];
+  vTaskList(ptrTaskList);
+  printf("*************main.cpp*************\r\n");
+  printf("Task  State   Prio    Stack    Num\r\n");
+  printf("**********************************\r\n");
+  printf(ptrTaskList);
+  printf("**********************************\r\n");
+
+  TaskHandle_t xHandle;
+  xHandle = xTaskGetHandle("microROS_app");
+
+  printf("startRTPStest.\n");
+  startRTPStest();
+
+  volatile auto size = uxTaskGetStackHighWaterMark(nullptr);
+
+  while (1){
+    if (eTaskGetState(xHandle) != eSuspended && availableNetwork){
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+      osDelay(100);
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+      osDelay(100);
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+      osDelay(150);
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+      osDelay(500);
+    }else{
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+      osDelay(1000);
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+      osDelay(1000);
+    }
+  }
+
+
+  /* USER CODE END 5 */
 }
 
 /**
@@ -569,7 +625,10 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
-
+  __disable_irq();
+  while (1)
+  {
+  }
   /* USER CODE END Error_Handler_Debug */
 }
 
@@ -582,7 +641,7 @@ void Error_Handler(void)
   * @retval None
   */
 void assert_failed(uint8_t *file, uint32_t line)
-{ 
+{
   /* USER CODE BEGIN 6 */
   /* User can add his own implementation to report the file name and line number,
      tex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
