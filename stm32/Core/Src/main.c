@@ -20,6 +20,10 @@
 #include "main.h"
 #include "cmsis_os.h"
 #include "lwip.h"
+#include "task.h"
+#include "FreeRTOS.h"
+
+#include <stdbool.h>
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -67,11 +71,27 @@ static void MX_USART6_UART_Init(void);
 void StartDefaultTask(void *argument);
 
 /* USER CODE BEGIN PFP */
+#define BUFSIZE 4096
+char buffer[BUFSIZE];
+extern struct netif gnetif;
+UART_HandleTypeDef * printf_uart = NULL;
+// extern appMain;
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+int __io_putchar(int ch)
+{
+  uint8_t c[1];
+  c[0] = ch & 0x00FF;
+  if (printf_uart != NULL){
+     HAL_UART_Transmit(printf_uart, &c[0], 1, 10);
+  }
+  return ch;
+}
+
+
 
 /* USER CODE END 0 */
 
@@ -84,6 +104,9 @@ int main(void)
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
+
+  /* Enable D-Cache---------------------------------------------------------*/
+  SCB_EnableDCache();
 
   /* MCU Configuration--------------------------------------------------------*/
 
@@ -107,9 +130,8 @@ int main(void)
   MX_USB_OTG_FS_PCD_Init();
   MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
-
+  printf_uart = &huart3;
   /* USER CODE END 2 */
-
   /* Init scheduler */
   osKernelInitialize();
 
@@ -168,7 +190,6 @@ void SystemClock_Config(void)
   /** Configure LSE Drive Capability
   */
   HAL_PWR_EnableBkUpAccess();
-
   /** Configure the main internal regulator output voltage
   */
   __HAL_RCC_PWR_CLK_ENABLE();
@@ -190,7 +211,6 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-
   /** Activate the Over-Drive mode
   */
   if (HAL_PWREx_EnableOverDrive() != HAL_OK)
@@ -395,12 +415,62 @@ void StartDefaultTask(void *argument)
   /* init code for LWIP */
   MX_LWIP_Init();
   /* USER CODE BEGIN 5 */
-  //osDelay(2000);
-  startRTPStest();
-  /* Infinite loop */
-  for(;;)
-  {
+  HAL_GPIO_WritePin(USB_PowerSwitchOn_GPIO_Port, USB_PowerSwitchOn_Pin, GPIO_PIN_RESET);
+  bool availableNetwork = false;
+
+  printf("Ethernet Initialization\r\n");
+
+  //Waiting for an IP
+  printf("Waiting for IP\r\n");
+  int retries = 0;
+  while(gnetif.ip_addr.addr == 0 && retries < 10){
+    osDelay(500);
+    retries++;
+  };
+
+  availableNetwork = (gnetif.ip_addr.addr != 0);
+  if (availableNetwork){
+    printf("IP: %s\r\n",ip4addr_ntoa(&gnetif.ip_addr));
+  }else{
+    printf("Impossible to retrieve an IP\n");
   }
+
+  osDelay(500);
+  char ptrTaskList[500];
+  vTaskList(ptrTaskList);
+  printf("*************main.cpp*************\r\n");
+  printf("Task  State   Prio    Stack    Num\r\n");
+  printf("**********************************\r\n");
+  printf(ptrTaskList);
+  printf("**********************************\r\n");
+
+  TaskHandle_t xHandle;
+  xHandle = xTaskGetHandle("microROS_app");
+
+  printf("startRTPStest.\n");
+  startRTPStest();
+
+  volatile auto size = uxTaskGetStackHighWaterMark(NULL);
+
+  while (1){
+    if (eTaskGetState(xHandle) != eSuspended && availableNetwork){
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+      osDelay(100);
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+      osDelay(100);
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+      osDelay(150);
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+      osDelay(500);
+    }else{
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+      osDelay(1000);
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+      osDelay(1000);
+    }
+  }
+
+
   /* USER CODE END 5 */
 }
 
